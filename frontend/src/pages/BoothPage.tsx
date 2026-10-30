@@ -32,6 +32,7 @@ export function BoothPage() {
   const [countdown, setCountdown] = useState<CountdownOption>(3);
   const [isCapturing, setIsCapturing] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
 
@@ -69,8 +70,14 @@ export function BoothPage() {
         footerText
       );
       const filename = `snapbooth-${Date.now()}.${format}`;
-      downloadCanvas(dataUrl, filename, format);
-      addToast(`Downloaded photostrip as ${format.toUpperCase()}! 🎉`, 'success');
+      const isMobile = /iPad|iPhone|iPod|Android/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      
+      if (isMobile) {
+        setPreviewImageUrl(dataUrl);
+      }
+      
+      await downloadCanvas(dataUrl, filename, format);
+      addToast(`Photo strip ready! 🎉`, 'success');
     } catch {
       addToast('Export failed. Please try again.', 'error');
     } finally {
@@ -639,6 +646,83 @@ export function BoothPage() {
       </div>
 
       <ToastContainer toasts={toasts} onRemove={removeToast} />
+
+      {/* iOS / Mobile Download Preview Modal */}
+      {previewImageUrl && (
+        <div
+          className="modal-overlay"
+          onClick={() => setPreviewImageUrl(null)}
+          style={{ zIndex: 99999, padding: '1rem' }}
+        >
+          <div
+            className="modal-box"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              maxWidth: 360,
+              width: '100%',
+              padding: '1.25rem',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: '1rem',
+              textAlign: 'center',
+            }}
+          >
+            <h3 style={{ margin: 0, fontFamily: 'Playfair Display, serif', fontSize: '1.2rem', color: 'var(--brown)' }}>
+              Your Photo Strip is Ready! 📸
+            </h3>
+            <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--warm-gray)' }}>
+              Press & hold the photo below and tap <strong>"Save to Photos"</strong> or use the button below:
+            </p>
+
+            <div style={{
+              maxHeight: '50vh',
+              overflowY: 'auto',
+              borderRadius: 10,
+              boxShadow: 'var(--shadow-md)',
+              background: 'var(--cream)',
+              padding: 4,
+            }}>
+              <img
+                src={previewImageUrl}
+                alt="Snapbooth Strip"
+                style={{
+                  maxHeight: '48vh',
+                  width: 'auto',
+                  display: 'block',
+                  borderRadius: 6,
+                }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', gap: '0.5rem', width: '100%' }}>
+              <button
+                className="btn-primary"
+                onClick={async () => {
+                  try {
+                    const res = await fetch(previewImageUrl);
+                    const blob = await res.blob();
+                    const file = new File([blob], `snapbooth-${Date.now()}.png`, { type: 'image/png' });
+                    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                      await navigator.share({ files: [file], title: 'Snapbooth' });
+                    }
+                  } catch {}
+                }}
+                style={{ flex: 1, padding: '0.6rem', fontSize: '0.85rem', justifyContent: 'center' }}
+              >
+                Share / Save to Photos
+              </button>
+              <button
+                className="btn-secondary"
+                onClick={() => setPreviewImageUrl(null)}
+                style={{ padding: '0.6rem 1rem', fontSize: '0.85rem' }}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

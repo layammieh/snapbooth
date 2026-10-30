@@ -163,7 +163,11 @@ export async function renderPhotoStrip(
       const img = await loadImage(photos[i]);
       ctx.save();
       ctx.beginPath();
-      ctx.roundRect(x, y, cellW, cellH, 4);
+      if (typeof ctx.roundRect === 'function') {
+        ctx.roundRect(x, y, cellW, cellH, 4);
+      } else {
+        ctx.rect(x, y, cellW, cellH);
+      }
       ctx.clip();
       applyCanvasFilter(ctx, filter, adjustments);
 
@@ -272,30 +276,63 @@ export async function renderPhotoStrip(
   return canvas.toDataURL('image/png', 1.0);
 }
 
-// Download helper
-export function downloadCanvas(dataUrl: string, filename: string, format: 'png' | 'jpeg' = 'png'): void {
-  const link = document.createElement('a');
+// Download helper with full iOS Safari, Web Share API, and blob support
+export async function downloadCanvas(dataUrl: string, filename: string, format: 'png' | 'jpeg' = 'png'): Promise<boolean> {
   const mimeType = format === 'jpeg' ? 'image/jpeg' : 'image/png';
-  
-  if (format === 'jpeg') {
-    // Convert to JPEG
-    const canvas = document.createElement('canvas');
-    const img = new Image();
-    img.onload = () => {
-      canvas.width = img.width;
-      canvas.height = img.height;
-      const ctx = canvas.getContext('2d')!;
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(img, 0, 0);
-      link.href = canvas.toDataURL(mimeType, 0.92);
-      link.download = filename;
-      link.click();
-    };
-    img.src = dataUrl;
-  } else {
-    link.href = dataUrl;
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+  try {
+    // 1. Convert dataUrl to Blob
+    const res = await fetch(dataUrl);
+    const blob = await res.blob();
+    const file = new File([blob], filename, { type: mimeType });
+
+    // 2. iOS Safari: Web Share API (lets user tap "Save Image" straight to Camera Roll)
+    if (isIOS && navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({
+          files: [file],
+          title: 'Snapbooth Photo Strip',
+        });
+        return true;
+      } catch (err: unknown) {
+        if ((err as Error)?.name === 'AbortError') {
+          return true; // User cancelled share sheet
+        }
+      }
+    }
+
+    // 3. Standard download link via Blob Object URL
+    const blobUrl = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = blobUrl;
     link.download = filename;
+    link.rel = 'noopener';
+    link.style.display = 'none';
+    document.body.appendChild(link);
     link.click();
+    
+    setTimeout(() => {
+      document.body.removeChild(link);
+      URL.revokeObjectURL(blobUrl);
+    }, 1000);
+
+    // 4. iOS Safari fallback if silent download fails
+    if (isIOS) {
+      setTimeout(() => {
+        // Open image directly so user can long-press "Save to Photos"
+        const newWindow = window.open(dataUrl, '_blank');
+        if (!newWindow) {
+          window.location.href = dataUrl;
+        }
+      }, 300);
+    }
+
+    return true;
+  } catch (e) {
+    console.error('Download error, falling back to window.open', e);
+    // Ultimate fallback
+    window.open(dataUrl, '_blank');
+    return false;
   }
 }
